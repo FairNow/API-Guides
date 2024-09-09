@@ -1,0 +1,4 @@
+# Dependencies used by notebooks in this project
+
+httpx
+httpx_auth

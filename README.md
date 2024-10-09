@@ -16,7 +16,7 @@ use the FairNow API's.  The recommended order is:
 
    1.  `Getting Started` - demonstrates how to configure authorization and make a first API call.
    2.  `Applications API` - create and read an `AI Application` with the API.  `AI Applications` are a core building block for the FairNow system.
-   3.  `Generating User Bias Test Data`  - construct a test data file to be used to for ML model bias evaluation.
+   3.  `Generating Synthetic User Bias Test Data`  - construct a synthetic test data file to be used to simulate ML model bias evaluation.  Constructing synthetic data is optonal.
    4.  `User Data Testing` - how to perform ML model bias testing via the API.  
 
 

@@ -2,3 +2,4 @@
 *.iml
 notebooks/.ipynb_checkpoints
 .venv/
+.python-version

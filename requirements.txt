@@ -2,3 +2,4 @@
 
 httpx
 httpx_auth
+pandas

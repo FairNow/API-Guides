@@ -14,7 +14,6 @@ def get_client(client_id):
         Replace the client_id with your FairNow client ID.
         The client secret will be prompted for at runtime.   
     """
-    # client_id = "{client_id}" # Replace with your Client Id
     client_secret = getpass("Client Secret: ")
     fairnow_token_endpoint = "https://auth.fairnow.ai/oauth2/token"
 

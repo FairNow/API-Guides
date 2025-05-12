@@ -16,7 +16,7 @@ def get_client(client_id):
     """
     # client_id = "{client_id}" # Replace with your Client Id
     client_secret = getpass("Client Secret: ")
-    fairnow_token_endpoint = "https://auth.fairnow.dev/oauth2/token"
+    fairnow_token_endpoint = "https://auth.fairnow.ai/oauth2/token"
 
     auth = OAuth2ClientCredentials(
         token_url=fairnow_token_endpoint,
@@ -24,7 +24,7 @@ def get_client(client_id):
         client_secret=client_secret,
     )
 
-    fairnow_base_url = "https://api.fairnow.dev/v2"
+    fairnow_base_url = "https://api.fairnow.ai/v2"
     client = httpx.Client(base_url=fairnow_base_url, auth=auth)
     return client
 

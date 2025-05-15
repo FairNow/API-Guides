@@ -1,7 +1,7 @@
 # utils/dataframe_helpers.py
 
 import pandas as pd
-from utils.api_helpers import get_application_data, get_framework_controls, get_vendor_data
+from utils.api_helpers import get_application_data, get_application_controls, get_frameworks, get_vendor_data
 from utils.fairnow import get_client
 
 def create_df(api_response):
@@ -14,7 +14,7 @@ def create_df(api_response):
     return pd.DataFrame(df)
 
 
-def create_compliance_df(client_id):
+def create_compliance_df(client_id, control_type):
     """
     Create a pandas DataFrame from the compliance data.
     """
@@ -27,47 +27,89 @@ def create_compliance_df(client_id):
     extracted_data = []
     for app in apps_response['applications']:
         app_id = app['application_id']
-        app_name = app['application_name']
+        application_name = app['application_name']
+        application_version = app.get('application_version', '')
         risk_assessment = app.get('risk_assessment', {})
         framework_items = risk_assessment.get('framework_assessment_items', []) or []
         for framework in framework_items:
             extracted_data.append({
                 'application_id': app_id,
-                'application_name': app_name,
+                'application_name': application_name,
+                'application_version': application_version,
                 'framework_id': framework.get('framework_id', ''),
                 'framework_name': framework.get('framework_name', ''),
             })
+    apps_df = create_df(extracted_data)
 
-    # Convert to DataFrame
-    apps_df=create_df(extracted_data)
-    
-    # Get Framework IDs for each entry in Applications DataFrame
-    framework_ids = apps_df['framework_id'].unique()
+    # Create a list of dictionaries for application_id and application_version
+    app_version_df = apps_df[['application_id', 'application_version']].drop_duplicates().to_dict('records')
 
-    # Get controls for each framework
-    controls_data = []
-    for framework_id in framework_ids:
-        controls = get_framework_controls(client, framework_id)
-        if controls:
-            # Add framework_id to each control record
-            for control in controls:
-                control['framework_id'] = framework_id
-            controls_data.extend(controls)
+   # Collect controls data
+    controls_list = []
+    for app in app_version_df:
+        controls_df = get_application_controls(client, app['application_id'], app['application_version'], control_type)
+        if controls_df is not None:
+            controls_df = controls_df.rename(columns={'framework': 'framework_id'})
+            controls_list.append(controls_df)
 
-    # Convert to DataFrame
-    controls_df = create_df(controls_data)
+    # Combine all controls
+    all_controls_df = pd.concat(controls_list, ignore_index=True)
 
-    # Merge with the original DataFrame
-    # This will add the control information to each framework row
-    merged_df = pd.merge(
-        apps_df[['application_id', 'application_name', 'framework_id', 'framework_name']],
-        controls_df[['framework_id', 'applications_count', 'applications_ready']],
+    # Aggregate controls data
+    result = all_controls_df.groupby(['application_id', 'application_version', 'framework_id']).agg(
+        count_controls=('ready', lambda x: sum(x == False)),
+        count_controls_ready=('ready', lambda x: sum(x == True)),
+        total_controls=('ready', 'count')
+    ).reset_index()
+
+    # Get frameworks names
+    frameworks_df = create_frameworks_df(client)
+    frameworks_df = frameworks_df[['framework_id', 'framework_name']]
+    frameworks_df = frameworks_df.drop_duplicates()
+
+    # Merge with frameworks_df
+    result = pd.merge(
+        result,
+        frameworks_df[['framework_id', 'framework_name']],
         on='framework_id',
         how='left'
     )
-    merged_df = merged_df.drop_duplicates()
-    print(f"Extracted {len(merged_df)} records")
-    return merged_df
+
+    # Merge with apps_df to get application_name
+    result = pd.merge(
+        result,
+        apps_df[['application_id', 'application_name', 'application_version']],
+        on=['application_id', 'application_version'],
+        how='left'
+    )
+
+    # Reorder columns
+    result = result[['application_id', 
+                     'application_name',
+                     'application_version', 
+                     'framework_id', 
+                     'framework_name', 
+                     'count_controls', 
+                     'count_controls_ready', 
+                     'total_controls']]
+
+    result = result.drop_duplicates()
+    return result
+
+
+def create_frameworks_df(client):
+    """
+    Create a pandas DataFrame from the frameworks data.
+    """
+    # client = get_client(client_id) # Replace with your Client Id
+    frameworks_response = get_frameworks(client)
+
+    if not frameworks_response:
+        print("No frameworks data received")
+        return pd.DataFrame()
+    else:
+        df = pd.DataFrame(frameworks_response)
+        return df[['framework_id', 'framework_name']]
 
 
 def create_inventory_df(client_id):

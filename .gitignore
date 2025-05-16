@@ -3,3 +3,4 @@
 notebooks/.ipynb_checkpoints
 .venv/
 .python-version
+__pycache__/

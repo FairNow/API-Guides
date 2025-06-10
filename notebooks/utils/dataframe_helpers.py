@@ -162,7 +162,7 @@ def create_frameworks_df(client):
 def create_inventory_df(client_id):
     """
     Create a pandas DataFrame from the inventory data.
-    Only returns applications with vendor data.
+    Includes all applications, joining vendor info when available.
     """
     client = get_client(client_id) # Replace with your Client Id
 
@@ -179,64 +179,65 @@ def create_inventory_df(client_id):
         app_id = app['application_id']
         app_name = app['application_name']
         vendor_id = app.get('vendor_id', '')
-        # Only include applications with vendor data
-        if vendor_id:
-            extracted_data.append({
-                'application_id': app_id,
-                'application_name': app_name,
-                'vendor_id': vendor_id,
-            })
+        risk_metadata = app.get('risk_metadata', {}) or {}
+        application_risk = risk_metadata.get('risk_framework_level', '')
+        application_source = app.get('application_source', '')
+        application_development_status = app.get('application_development_status', '')
+        extracted_data.append({
+            'application_id': app_id,
+            'application_name': app_name,
+            'vendor_id': vendor_id,
+            'application_risk': application_risk,
+            'application_source': application_source,
+            'application_development_status': application_development_status,
+        })
 
     # Convert to DataFrame
     apps_df = create_df(extracted_data)
     
-    if apps_df.empty:
-        print("No applications with vendor data found")
-        return pd.DataFrame()  # Return empty DataFrame
-
     # Retrieve vendor data from the API
     response = get_vendor_data(client)
     
     if not response:
         print("No vendor data found")
-        return pd.DataFrame()
+        apps_df['vendor_name'] = ''
+        apps_df['vendor_status'] = ''
+        return apps_df
 
     # Extract fields from response
     extracted_data = []
     for vendor in response:
-        # Get vendor information
         vendor_id = vendor.get('vendor_id', '')
         vendor_name = vendor.get('vendor_name', '')
-        status = vendor.get('status', '')
-        
-        # Get governance information
-        governance = vendor.get('governance', {})
-        risk_program = governance.get('risk_program', '') if governance else ''
-        
-        linked_apps = vendor.get('linked_applications', [])
-        if linked_apps:
-            extracted_data.append({
-                'vendor_id': vendor_id,
-                'vendor_name': vendor_name,
-                'status': status,
-                'risk_program': risk_program
-            })
+        vendor_status = vendor.get('status', '')
+        extracted_data.append({
+            'vendor_id': vendor_id,
+            'vendor_name': vendor_name,
+            'vendor_status': vendor_status,
+        })
 
     # Convert to DataFrame
     vendors_df = create_df(extracted_data)
     
-    if vendors_df.empty:
-        print("No vendor data found")
-        return pd.DataFrame()
-
     # Merge DataFrames
     merged_df = pd.merge(
-        apps_df[['application_id', 'application_name', 'vendor_id']],
-        vendors_df[['vendor_id', 'vendor_name', 'status', 'risk_program']],
+        apps_df,
+        vendors_df,
         on='vendor_id',
         how='left'
     )
     merged_df = merged_df.drop_duplicates()
+
+    merged_df = merged_df[[
+        'application_id',
+        'application_name',
+        'application_source',
+        'application_development_status',
+        'application_risk',
+        'vendor_id',
+        'vendor_name',
+        'vendor_status'
+    ]]
     return merged_df
 
 

@@ -183,6 +183,7 @@ def create_inventory_df(client_id):
         application_risk = risk_metadata.get('risk_framework_level', '')
         application_source = app.get('application_source', '')
         application_development_status = app.get('application_development_status', '')
+        application_approval_status = app.get('approval_status', '')
         extracted_data.append({
             'application_id': app_id,
             'application_name': app_name,
@@ -190,6 +191,7 @@ def create_inventory_df(client_id):
             'application_risk': application_risk,
             'application_source': application_source,
             'application_development_status': application_development_status,
+            'application_approval_status': application_approval_status,
         })
 
     # Convert to DataFrame
@@ -233,6 +235,7 @@ def create_inventory_df(client_id):
         'application_name',
         'application_source',
         'application_development_status',
+        'application_approval_status',
         'application_risk',
         'vendor_id',
         'vendor_name',

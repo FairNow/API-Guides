@@ -43,7 +43,7 @@ def create_compliance_df(client_id, control_type):
                 'application_name': application_name,
                 'application_version': application_version,
                 'framework_id': framework.get('framework_id', ''),
-                'framework_name': framework.get('framework_name', ''),
+                # 'framework_name': framework.get('framework_name', ''),
             })
     apps_df = create_df(extracted_data)
     
@@ -120,11 +120,14 @@ def create_compliance_df(client_id, control_type):
             how='left'
         )
 
-        # Map framework_name from apps_df using framework_id
-        framework_names = apps_df[['framework_id', 'framework_name']].drop_duplicates()
+        # Map framework_name from frameworks_df using framework_id
+        frameworks_df = create_frameworks_df(client)
+        if frameworks_df.empty:
+            print("No frameworks data found")
+            return pd.DataFrame()
         result = pd.merge(
             result,
-            framework_names,
+            frameworks_df[['framework_id', 'framework_name']],
             on='framework_id',
             how='left'
         )

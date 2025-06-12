@@ -20,7 +20,7 @@ def create_compliance_df(client_id, control_type):
     If control_type is 'company', returns framework-level aggregation.
     If control_type is 'application', returns application + framework-level details.
     """
-    client = get_client(client_id) # Replace with your Client Id
+    client = get_client(client_id)
 
     # Retrieve application data from the API
     apps_response = get_application_data(client)
@@ -29,8 +29,8 @@ def create_compliance_df(client_id, control_type):
         print("No application data found")
         return pd.DataFrame()
 
-    # Extract fields from response
-    extracted_data = []
+    # Create master list of all applications
+    master_apps = []
     for app in apps_response['applications']:
         app_id = app['application_id']
         application_name = app['application_name']
@@ -38,22 +38,22 @@ def create_compliance_df(client_id, control_type):
         risk_assessment = app.get('risk_assessment', {})
         framework_items = risk_assessment.get('framework_assessment_items', []) or []
         for framework in framework_items:
-            extracted_data.append({
+            master_apps.append({
                 'application_id': app_id,
                 'application_name': application_name,
                 'application_version': application_version,
                 'framework_id': framework.get('framework_id', ''),
             })
-    apps_df = create_df(extracted_data)
+    master_apps_df = create_df(master_apps)
     
-    if apps_df.empty:
+    if master_apps_df.empty:
         print("No framework data found in applications")
         return pd.DataFrame()
 
     # Create a list of dictionaries for application_id and application_version
-    app_version_df = apps_df[['application_id', 'application_version']].drop_duplicates().to_dict('records')
+    app_version_df = master_apps_df[['application_id', 'application_version']].drop_duplicates().to_dict('records')
 
-   # Collect controls data
+    # Collect controls data
     controls_list = []
     for app in app_version_df:
         controls_df = get_application_controls(client, app['application_id'], app['application_version'], control_type)
@@ -63,10 +63,22 @@ def create_compliance_df(client_id, control_type):
 
     if not controls_list:
         print("No controls data found")
-        return pd.DataFrame()
+        # Return empty DataFrame with correct columns based on control_type
+        if control_type == 'company':
+            return pd.DataFrame(columns=['framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
+        else:
+            return pd.DataFrame(columns=['application_id', 'application_name', 'application_version', 
+                                       'framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
 
     # Combine all controls
     all_controls_df = pd.concat(controls_list, ignore_index=True)
+
+    # Get frameworks names
+    frameworks_df = create_frameworks_df(client)
+    if frameworks_df.empty:
+        print("No frameworks data found")
+        return pd.DataFrame()
+    frameworks_df = frameworks_df[['framework_id', 'framework_name']].drop_duplicates()
 
     # Get controls for control_type 'company'
     if control_type == 'company':
@@ -79,19 +91,10 @@ def create_compliance_df(client_id, control_type):
             total_controls=('ready', 'count')
         ).reset_index()
 
-        # Get frameworks names
-        frameworks_df = create_frameworks_df(client)
-        if frameworks_df.empty:
-            print("No frameworks data found")
-            return pd.DataFrame()
-            
-        frameworks_df = frameworks_df[['framework_id', 'framework_name']]
-        frameworks_df = frameworks_df.drop_duplicates()
-
         # Merge with frameworks_df
         result = pd.merge(
             result,
-            frameworks_df[['framework_id', 'framework_name']],
+            frameworks_df,
             on='framework_id',
             how='left'
         )
@@ -110,26 +113,25 @@ def create_compliance_df(client_id, control_type):
             total_controls=('ready', 'count')
         ).reset_index()
 
-        # Map application_name from apps_df using application_id and application_version
-        app_names = apps_df[['application_id', 'application_version', 'application_name']].drop_duplicates()
+        # Map framework_name from frameworks_df
         result = pd.merge(
             result,
-            app_names,
+            frameworks_df,
+            on='framework_id',
+            how='left'
+        )
+
+        # Join back to master_apps_df to include all applications
+        result = pd.merge(
+            master_apps_df[['application_id', 'application_version', 'application_name']].drop_duplicates(),
+            result,
             on=['application_id', 'application_version'],
             how='left'
         )
 
-        # Map framework_name from frameworks_df using framework_id
-        frameworks_df = create_frameworks_df(client)
-        if frameworks_df.empty:
-            print("No frameworks data found")
-            return pd.DataFrame()
-        result = pd.merge(
-            result,
-            frameworks_df[['framework_id', 'framework_name']],
-            on='framework_id',
-            how='left'
-        )
+        # # Fill NaN values for controls with 0
+        # result['count_controls_ready'] = result['count_controls_ready'].fillna(0)
+        # result['total_controls'] = result['total_controls'].fillna(0)
 
         # Reorder columns
         result = result[['application_id', 

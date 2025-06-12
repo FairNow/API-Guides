@@ -129,10 +129,6 @@ def create_compliance_df(client_id, control_type):
             how='left'
         )
 
-        # # Fill NaN values for controls with 0
-        # result['count_controls_ready'] = result['count_controls_ready'].fillna(0)
-        # result['total_controls'] = result['total_controls'].fillna(0)
-
         # Reorder columns
         result = result[['application_id', 
                         'application_name',

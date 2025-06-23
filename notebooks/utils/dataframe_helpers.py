@@ -5,6 +5,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.api_helpers import get_applications, get_application_by_id, get_application_controls, get_frameworks, get_vendor_data
 from utils.fairnow import get_client
 
+
+def _get_app_details(app, client):
+    """Helper function to get detailed application information"""
+    try:
+        app_id = app['application_id']
+        app_details = get_application_by_id(client, app_id)
+        return app_id, app_details
+    except Exception as e:
+        print(f"Error getting details for app {app['application_id']}: {e}")
+        return app['application_id'], None
+
+
+def _get_controls_for_app(app, client, control_type):
+    """Helper function to get controls for a single application"""
+    try:
+        controls_df = get_application_controls(client, app['application_id'], control_type, application_version="1.0")
+        if controls_df is not None and not controls_df.empty:
+            controls_df = controls_df.rename(columns={'framework': 'framework_id'})
+            return controls_df
+        return None
+    except Exception as e:
+        print(f"Error getting controls for app {app['application_id']}: {e}")
+        return None
+
+
 def create_df(api_response):
     """
     Create a pandasDataFrame from a JSON response.
@@ -65,22 +90,10 @@ def create_compliance_df(client_id, control_type):
     # Collect controls data
     controls_list = []
     
-    def get_controls_for_app(app):
-        """Helper function to get controls for a single application"""
-        try:
-            controls_df = get_application_controls(client, app['application_id'], control_type, application_version="1.0")
-            if controls_df is not None and not controls_df.empty:
-                controls_df = controls_df.rename(columns={'framework': 'framework_id'})
-                return controls_df
-            return None
-        except Exception as e:
-            print(f"Error getting controls for app {app['application_id']}: {e}")
-            return None
-    
     # Use ThreadPoolExecutor for parallel API calls
     with ThreadPoolExecutor(max_workers=10) as executor:
         # Submit all tasks
-        future_to_app = {executor.submit(get_controls_for_app, app): app for app in app_list}
+        future_to_app = {executor.submit(_get_controls_for_app, app, client, control_type): app for app in app_list}
         
         # Collect results as they complete
         for future in as_completed(future_to_app):
@@ -104,19 +117,6 @@ def create_compliance_df(client_id, control_type):
     # Combine all controls
     all_controls_df = pd.concat(controls_list, ignore_index=True)
     
-    # Check if we have the required columns for grouping
-    required_columns = ['application_id', 'framework_id', 'ready']
-    missing_columns = [col for col in required_columns if col not in all_controls_df.columns]
-    if missing_columns:
-        print(f"Missing required columns: {missing_columns}")
-        print("Available columns:", all_controls_df.columns.tolist())
-        # Return empty DataFrame with correct columns based on control_type
-        if control_type == 'company':
-            return pd.DataFrame(columns=['framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
-        else:
-            return pd.DataFrame(columns=['application_id', 'application_name', 
-                                       'framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
-
     # Get frameworks names
     frameworks_df = create_frameworks_df(client)
     if frameworks_df.empty:
@@ -316,21 +316,10 @@ def create_risks_df(client_id):
     
     all_apps_df = create_df(all_apps_data)
     
-    # Get detailed application information using parallel processing
-    def get_app_details(app):
-        """Helper function to get detailed application information"""
-        try:
-            app_id = app['application_id']
-            app_details = get_application_by_id(client, app_id)
-            return app_id, app_details
-        except Exception as e:
-            print(f"Error getting details for app {app['application_id']}: {e}")
-            return app['application_id'], None
-    
     # Use ThreadPoolExecutor for parallel API calls
     with ThreadPoolExecutor(max_workers=10) as executor:
         # Submit all tasks
-        future_to_app = {executor.submit(get_app_details, app): app for app in apps_response}
+        future_to_app = {executor.submit(_get_app_details, app, client): app for app in apps_response}
         
         # Collect results as they complete
         for future in as_completed(future_to_app):

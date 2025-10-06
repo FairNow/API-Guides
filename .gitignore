@@ -2,5 +2,5 @@
 *.iml
 notebooks/.ipynb_checkpoints
 .venv/
-.python-version
+#.python-version
 __pycache__/

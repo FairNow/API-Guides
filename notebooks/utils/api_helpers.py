@@ -114,7 +114,7 @@ def get_vendor_data(client):
     """
     Get vendor data from the FairNow API.
     """
-    application_route = "/vendors/"
+    application_route = "/vendors"
 
     response = None
     try:

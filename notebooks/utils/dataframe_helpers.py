@@ -164,31 +164,40 @@ def create_inventory_df(client_id):
     Create a pandas DataFrame from the inventory data.
     Includes all applications, joining vendor info when available.
     """
+    
     client = get_client(client_id) # Replace with your Client Id
 
     # Retrieve application data from the API
-    apps_response = get_application_data(client)
-    
-    if not apps_response or 'applications' not in apps_response or not apps_response['applications']:
-        print("No application data found")
+    applications = get_application_data(client)
+
+    if not applications:
+        print("ERROR: No applications found")
         return pd.DataFrame()
 
     # Extract fields from response
     extracted_data = []
-    for app in apps_response['applications']:
-        app_id = app['application_id']
-        app_name = app['application_name']
-        vendor_id = app.get('vendor_id', '')
-        risk_metadata = app.get('risk_metadata', {}) or {}
-        application_risk = risk_metadata.get('risk_framework_level', '')
-        application_source = app.get('application_source', '')
-        application_development_status = app.get('application_development_status', '')
-        application_approval_status = app.get('approval_status', '')
+    for app in applications:
+        app_id = app['id']
+        app_name = app['name']
+        vendor_id = ''
+        # Extract vendor_id from vendor_links if present
+        vendor_links = app.get('vendor_links', [])
+        if vendor_links:
+            vendor_id = vendor_links[0].get('vendor_id', '')
+        
+        application_source = app.get('source', '')
+        application_development_status = app.get('development_status', '')
+        
+        # Extract approval status
+        approval_statuses = app.get('approval_statuses', [])
+        application_approval_status = ''
+        if approval_statuses:
+            application_approval_status = approval_statuses[0].get('status', '')
+        
         extracted_data.append({
             'application_id': app_id,
             'application_name': app_name,
             'vendor_id': vendor_id,
-            'application_risk': application_risk,
             'application_source': application_source,
             'application_development_status': application_development_status,
             'application_approval_status': application_approval_status,
@@ -198,28 +207,28 @@ def create_inventory_df(client_id):
     apps_df = create_df(extracted_data)
     
     # Retrieve vendor data from the API
-    response = get_vendor_data(client)
+    vendors_response = get_vendor_data(client)
     
-    if not response:
-        print("No vendor data found")
+    if not vendors_response:
+        print("WARNING: No vendor data found, adding empty vendor columns")
         apps_df['vendor_name'] = ''
         apps_df['vendor_status'] = ''
         return apps_df
 
     # Extract fields from response
-    extracted_data = []
-    for vendor in response:
-        vendor_id = vendor.get('vendor_id', '')
-        vendor_name = vendor.get('vendor_name', '')
+    vendor_data = []
+    for vendor in vendors_response:
+        vendor_id = vendor.get('id', '')
+        vendor_name = vendor.get('name', '')
         vendor_status = vendor.get('status', '')
-        extracted_data.append({
+        vendor_data.append({
             'vendor_id': vendor_id,
             'vendor_name': vendor_name,
             'vendor_status': vendor_status,
         })
 
     # Convert to DataFrame
-    vendors_df = create_df(extracted_data)
+    vendors_df = create_df(vendor_data)
     
     # Merge DataFrames
     merged_df = pd.merge(
@@ -228,6 +237,7 @@ def create_inventory_df(client_id):
         on='vendor_id',
         how='left'
     )
+
     merged_df = merged_df.drop_duplicates()
 
     merged_df = merged_df[[
@@ -236,7 +246,6 @@ def create_inventory_df(client_id):
         'application_source',
         'application_development_status',
         'application_approval_status',
-        'application_risk',
         'vendor_id',
         'vendor_name',
         'vendor_status'
@@ -249,46 +258,47 @@ def create_risks_df(client_id):
     Create a pandas DataFrame from the risks data.
     Returns all applications, with null values for those without risk information.
     """
+    
     client = get_client(client_id) # Replace with your Client Id
 
     # Retrieve application data from the API
-    apps_response = get_application_data(client)
+    applications = get_application_data(client)
     
-    if not apps_response or 'applications' not in apps_response or not apps_response['applications']:
-        print("No application data found")
+    if not applications:
+        print("ERROR: No applications found")
         return pd.DataFrame()
 
     # First create a DataFrame with all applications
     all_apps_data = []
-    for app in apps_response['applications']:
-        risk_metadata = app.get('risk_metadata', {}) or {}
-        application_risk_level = risk_metadata.get('risk_framework_level', None)
+    for app in applications:
+        assessed_risk_level = app.get('assessed_risk_level', None)
         all_apps_data.append({
-            'application_id': app['application_id'],
-            'application_name': app['application_name'],
-            'application_risk_level': application_risk_level
+            'application_id': app['id'],
+            'application_name': app['name'],
+            'assessed_risk_level': assessed_risk_level
         })
     all_apps_df = create_df(all_apps_data)
 
     # Create a DataFrame from the risk data
     risk_data = []
-    for app in apps_response['applications']:
-        app_id = app['application_id']
-        risk_items = app.get('risk_item_list', []) or []
+    for app in applications:
+        app_id = app['id']
+        risk_items = app.get('assigned_risk_items', []) or []
         for risk_item in risk_items:
             risk_data.append({
                 'application_id': app_id,
-                'risk_type': risk_item.get('risk_type_label', ''),
+                'risk_type': risk_item.get('risk_type', ''),
                 'severity': risk_item.get('severity', ''),
                 'probability': risk_item.get('probability', ''),
+                # 'description': risk_item.get('description', ''),
             })
 
     # Convert risk data to DataFrame
     risk_df = create_df(risk_data)
     
     if risk_df.empty:
-        print("No risk data found")
-        return pd.DataFrame()
+        print("WARNING: No risk data found")
+        return all_apps_df  # Return apps without risk data
 
     # Merge all applications with risk data
     result = pd.merge(
@@ -297,5 +307,4 @@ def create_risks_df(client_id):
         on='application_id',
         how='left'
     )
-    
     return result

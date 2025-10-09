@@ -1,12 +1,11 @@
-# utils/dataframe_helpers.py
-
 import pandas as pd
-from utils.api_helpers import get_application_data, get_application_controls, get_frameworks, get_vendor_data
+from utils.api_helpers import get_applications, get_frameworks, get_vendors, get_application_by_id, get_controls
 from utils.fairnow import get_client
 
-def create_df(api_response):
+
+def create_df(api_response) -> pd.DataFrame:
     """
-    Create a pandasDataFrame from a JSON response.
+    Create a pandas DataFrame from a JSON response.
     """
     # Convert to DataFrame
     df = pd.DataFrame(api_response)
@@ -14,149 +13,197 @@ def create_df(api_response):
     return pd.DataFrame(df)
 
 
-def create_compliance_df(client_id, control_type):
+def create_application_compliance_df(client_id) -> pd.DataFrame:
     """
-    Create a pandas DataFrame from the compliance data.
-    If control_type is 'company', returns framework-level aggregation.
-    If control_type is 'application', returns application + framework-level details.
+    Create a pandas DataFrame from the application compliance data.
     """
     client = get_client(client_id)
 
-    # Retrieve application data from the API
-    apps_response = get_application_data(client)
-    
-    if not apps_response or 'applications' not in apps_response or not apps_response['applications']:
-        print("No application data found")
-        return pd.DataFrame()
-
-    # Create master list of all applications
-    master_apps = []
-    for app in apps_response['applications']:
-        app_id = app['application_id']
-        application_name = app['application_name']
-        application_version = app.get('application_version', '')
-        risk_assessment = app.get('risk_assessment', {})
-        framework_items = risk_assessment.get('framework_assessment_items', []) or []
-        for framework in framework_items:
-            master_apps.append({
-                'application_id': app_id,
-                'application_name': application_name,
-                'application_version': application_version,
-                'framework_id': framework.get('framework_id', ''),
-            })
-    master_apps_df = create_df(master_apps)
-    
-    if master_apps_df.empty:
-        print("No framework data found in applications")
-        return pd.DataFrame()
-
-    # Create a list of dictionaries for application_id and application_version
-    app_version_df = master_apps_df[['application_id', 'application_version']].drop_duplicates().to_dict('records')
-
-    # Collect controls data
-    controls_list = []
-    for app in app_version_df:
-        controls_df = get_application_controls(client, app['application_id'], app['application_version'], control_type)
-        if controls_df is not None:
-            controls_df = controls_df.rename(columns={'framework': 'framework_id'})
-            controls_list.append(controls_df)
-
-    if not controls_list:
-        print("No controls data found")
-        # Return empty DataFrame with correct columns based on control_type
-        if control_type == 'company':
-            return pd.DataFrame(columns=['framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
-        else:
-            return pd.DataFrame(columns=['application_id', 'application_name', 'application_version', 
-                                       'framework_id', 'framework_name', 'count_controls_ready', 'total_controls'])
-
-    # Combine all controls
-    all_controls_df = pd.concat(controls_list, ignore_index=True)
-
-    # Get frameworks names
-    frameworks_df = create_frameworks_df(client)
-    if frameworks_df.empty:
-        print("No frameworks data found")
-        return pd.DataFrame()
-    frameworks_df = frameworks_df[['framework_id', 'framework_name']].drop_duplicates()
-
-    # Get controls for control_type 'company'
-    if control_type == 'company':
-        # Get unique controls per framework
-        unique_controls = all_controls_df.drop_duplicates(['framework_id', 'control_id'])
-        
-        # Aggregate at framework level
-        result = unique_controls.groupby(['framework_id']).agg(
-            count_controls_ready=('ready', lambda x: sum(x == True)),
-            total_controls=('ready', 'count')
-        ).reset_index()
-
-        # Merge with frameworks_df
-        result = pd.merge(
-            result,
-            frameworks_df,
-            on='framework_id',
-            how='left'
-        )
-
-        # Reorder columns
-        result = result[['framework_id', 
-                        'framework_name', 
-                        'count_controls_ready', 
-                        'total_controls']]
-
-    # Get controls for control_type 'application'
-    else:
-        # Aggregate controls data with application details
-        result = all_controls_df.groupby(['application_id', 'application_version', 'framework_id']).agg(
-            count_controls_ready=('ready', lambda x: sum(x == True)),
-            total_controls=('ready', 'count')
-        ).reset_index()
-
-        # Map framework_name from frameworks_df
-        result = pd.merge(
-            result,
-            frameworks_df,
-            on='framework_id',
-            how='left'
-        )
-
-        # Join back to master_apps_df to include all applications
-        result = pd.merge(
-            master_apps_df[['application_id', 'application_version', 'application_name']].drop_duplicates(),
-            result,
-            on=['application_id', 'application_version'],
-            how='left'
-        )
-
-        # Reorder columns
-        result = result[['application_id', 
-                        'application_name',
-                        'application_version', 
-                        'framework_id', 
-                        'framework_name',
-                        'count_controls_ready', 
-                        'total_controls']]
-
-    result = result.drop_duplicates()
-    return result
-
-
-def create_frameworks_df(client):
-    """
-    Create a pandas DataFrame from the frameworks data.
-    """
-    frameworks_response = get_frameworks(client)
-
-    if not frameworks_response:
-        print("No frameworks data received")
-        return pd.DataFrame()
-    else:
-        df = pd.DataFrame(frameworks_response)
-        if df.empty:
-            print("No frameworks data found")
+    def build_raw_application_controls(client) -> pd.DataFrame:
+        applications_list = get_applications(client)
+        if not applications_list:
             return pd.DataFrame()
-        return df[['framework_id', 'framework_name']]
+
+        all_rows = []
+
+        def process_app(app):
+            app_id = app.get("id")
+            app_name = app.get("name")
+
+            app_json = get_application_by_id(client, app_id)
+            if not app_json:
+                return []
+
+            controls_dict = {c.get("id"): c for c in app_json.get("controls", [])}
+            frameworks = app_json.get("frameworks", [])
+
+            # Include a placeholder row for applications without frameworks
+            if not frameworks:
+                return [{
+                    "application_id": app_id,
+                    "application_name": app_name,
+                    "framework_id": pd.NA,
+                    "framework_name": pd.NA,
+                    "control_id": pd.NA,
+                    "control_status": pd.NA,
+                    "control_implemented": pd.NA,
+                }]
+
+            rows = []
+            for fw in frameworks:
+                fw_id = fw.get("id")
+                fw_name = fw.get("name")
+                for req in fw.get("requirements", []):
+                    for ctrl_link in req.get("control_links", []):
+                        ctrl_id = ctrl_link.get("id")
+                        ctrl = controls_dict.get(ctrl_id, {})
+                        status = ctrl.get("status", {})
+                        rows.append({
+                            "application_id": app_id,
+                            "application_name": app_name,
+                            "framework_id": fw_id,
+                            "framework_name": fw_name,
+                            "control_id": ctrl_id,
+                            "control_status": status.get("control_state"),
+                            "control_implemented": status.get("is_complete"),
+                        })
+            return rows
+
+        # Process applications sequentially
+        for app in applications_list:
+            rows = process_app(app)
+            if rows:
+                all_rows.extend(rows)
+
+        raw_df = pd.DataFrame(all_rows)
+        if not raw_df.empty:
+            raw_df = raw_df.drop_duplicates(subset=["application_id", "framework_id", "control_id"])
+        return raw_df
+
+
+    def aggregate_compliance(raw_df: pd.DataFrame) -> pd.DataFrame:
+        if raw_df.empty:
+            return pd.DataFrame()
+
+        # Keep only ACTIVE controls
+        active_df = raw_df[raw_df["control_status"] == "ACTIVE"].copy()
+
+        # Aggregate per application + framework
+        summary_df = (
+            active_df.groupby(
+                ["application_id", "application_name", "framework_id", "framework_name"],
+                as_index=False
+            )
+            .agg(
+                count_controls_ready=("control_implemented", lambda x: x.sum(skipna=True)),
+                count_controls_total=("control_implemented", "count"),
+            )
+        )
+
+        # Handle applications without frameworks
+        apps_no_fw = raw_df[raw_df["framework_id"].isna()][["application_id", "application_name"]].drop_duplicates()
+        if not apps_no_fw.empty:
+            placeholder_rows = pd.DataFrame({
+                "application_id": apps_no_fw["application_id"],
+                "application_name": apps_no_fw["application_name"],
+                "framework_id": pd.NA,
+                "framework_name": pd.NA,
+                "count_controls_ready": pd.NA,
+                "count_controls_total": pd.NA,
+            })
+            summary_df = pd.concat([summary_df, placeholder_rows], ignore_index=True)
+
+
+        # Cast to int and sort
+        summary_df["count_controls_ready"] = summary_df["count_controls_ready"].astype("Int64")
+        summary_df["count_controls_total"] = summary_df["count_controls_total"].astype("Int64")
+
+        summary_df = summary_df.sort_values(by="application_name", ascending=True).reset_index(drop=True)
+
+        return summary_df
+
+    raw_df = build_raw_application_controls(client)
+    return aggregate_compliance(raw_df)
+
+
+def create_company_compliance_df(client_id) -> pd.DataFrame:
+    """
+    Create a pandas DataFrame summarizing company-level compliance by framework.
+    Only frameworks with at least one ACTIVE company-level control are included.
+    """
+    client = get_client(client_id)
+
+    def build_raw_company_controls(client) -> pd.DataFrame:
+        frameworks_list = get_frameworks(client)
+        controls_list = get_controls(client)
+
+        if not frameworks_list:
+            return pd.DataFrame()
+
+        # Only COMPANY type controls
+        controls_dict = {c["id"]: c for c in controls_list if c.get("type") == "COMPANY"}
+
+        all_rows = []
+
+        def process_framework(fw):
+            fw_id = fw.get("id")
+            fw_name = fw.get("name")
+
+            rows = []
+            for req in fw.get("requirements", []):
+                for ctrl_link in req.get("control_links", []):
+                    ctrl_id = ctrl_link.get("id")
+                    ctrl = controls_dict.get(ctrl_id)
+                    if not ctrl:
+                        continue
+                    status = ctrl.get("status", {})
+                    if status.get("control_state") == "ACTIVE":  # Filter early
+                        rows.append({
+                            "framework_id": fw_id,
+                            "framework_name": fw_name,
+                            "control_id": ctrl_id,
+                            "control_status": status.get("control_state"),
+                            "control_implemented": status.get("is_complete"),
+                        })
+            return rows
+
+        # Process frameworks sequentially
+        for fw in frameworks_list:
+            rows = process_framework(fw)
+            if rows:
+                all_rows.extend(rows)
+
+        if not all_rows:
+            return pd.DataFrame()
+
+        raw_df = pd.DataFrame(all_rows)
+        raw_df = raw_df.drop_duplicates(subset=["framework_id", "control_id"])
+        return raw_df
+
+    def aggregate_company_compliance(raw_df: pd.DataFrame) -> pd.DataFrame:
+        if raw_df.empty:
+            return pd.DataFrame()
+
+        summary_df = (
+            raw_df.groupby(
+                ["framework_id", "framework_name"],
+                as_index=False
+            )
+            .agg(
+                count_controls_ready=("control_implemented", lambda x: x.sum(skipna=True)),
+                count_controls_total=("control_implemented", "count"),
+            )
+        )
+
+        # Cast to int and sort
+        summary_df["count_controls_ready"] = summary_df["count_controls_ready"].astype("Int64")
+        summary_df["count_controls_total"] = summary_df["count_controls_total"].astype("Int64")
+
+        summary_df = summary_df.sort_values(by="framework_name", ascending=True).reset_index(drop=True)
+        return summary_df
+
+    raw_df = build_raw_company_controls(client)
+    return aggregate_company_compliance(raw_df)
 
 
 def create_inventory_df(client_id):
@@ -164,31 +211,59 @@ def create_inventory_df(client_id):
     Create a pandas DataFrame from the inventory data.
     Includes all applications, joining vendor info when available.
     """
+    
     client = get_client(client_id) # Replace with your Client Id
 
     # Retrieve application data from the API
-    apps_response = get_application_data(client)
-    
-    if not apps_response or 'applications' not in apps_response or not apps_response['applications']:
-        print("No application data found")
+    applications = get_applications(client)
+
+    if not applications:
         return pd.DataFrame()
 
     # Extract fields from response
     extracted_data = []
-    for app in apps_response['applications']:
-        app_id = app['application_id']
-        app_name = app['application_name']
-        vendor_id = app.get('vendor_id', '')
-        risk_metadata = app.get('risk_metadata', {}) or {}
-        application_risk = risk_metadata.get('risk_framework_level', '')
-        application_source = app.get('application_source', '')
-        application_development_status = app.get('application_development_status', '')
-        application_approval_status = app.get('approval_status', '')
+
+    for app in applications:
+        app_id = app.get("id", "")
+        app_name = app.get("name", "")
+        vendor_id = ""
+
+        # Extract vendor_id safely from vendor_links
+        vendor_links = app.get("vendor_links") or []
+        if isinstance(vendor_links, list):
+            # Prefer the first link with a vendor_id key
+            vendor = next(
+                (v for v in vendor_links if v.get("vendor_id")),
+                None
+            )
+            if vendor:
+                vendor_id = vendor.get("vendor_id", "")
+
+        application_source = app.get("source", "")
+        application_development_status = app.get("development_status", "")
+
+        # Extract approval status
+        approval_statuses = app.get("approval_statuses") or []
+        application_approval_status = ""
+
+        if isinstance(approval_statuses, list):
+            default_status = next(
+                (a for a in approval_statuses if a.get("approval_type") == "default"),
+                None,
+            )
+
+            if default_status:
+                application_approval_status = default_status.get("status", "")
+            elif approval_statuses:
+                raise ValueError(
+                    f"No 'default' approval_type found for application {app.get('id')}. "
+                    f"Available statuses: {approval_statuses}"
+                )
+
         extracted_data.append({
             'application_id': app_id,
             'application_name': app_name,
             'vendor_id': vendor_id,
-            'application_risk': application_risk,
             'application_source': application_source,
             'application_development_status': application_development_status,
             'application_approval_status': application_approval_status,
@@ -198,28 +273,27 @@ def create_inventory_df(client_id):
     apps_df = create_df(extracted_data)
     
     # Retrieve vendor data from the API
-    response = get_vendor_data(client)
+    vendors_response = get_vendors(client)
     
-    if not response:
-        print("No vendor data found")
+    if not vendors_response:
         apps_df['vendor_name'] = ''
         apps_df['vendor_status'] = ''
         return apps_df
 
     # Extract fields from response
-    extracted_data = []
-    for vendor in response:
-        vendor_id = vendor.get('vendor_id', '')
-        vendor_name = vendor.get('vendor_name', '')
+    vendor_data = []
+    for vendor in vendors_response:
+        vendor_id = vendor.get('id', '')
+        vendor_name = vendor.get('name', '')
         vendor_status = vendor.get('status', '')
-        extracted_data.append({
+        vendor_data.append({
             'vendor_id': vendor_id,
             'vendor_name': vendor_name,
             'vendor_status': vendor_status,
         })
 
     # Convert to DataFrame
-    vendors_df = create_df(extracted_data)
+    vendors_df = create_df(vendor_data)
     
     # Merge DataFrames
     merged_df = pd.merge(
@@ -228,6 +302,7 @@ def create_inventory_df(client_id):
         on='vendor_id',
         how='left'
     )
+
     merged_df = merged_df.drop_duplicates()
 
     merged_df = merged_df[[
@@ -236,7 +311,6 @@ def create_inventory_df(client_id):
         'application_source',
         'application_development_status',
         'application_approval_status',
-        'application_risk',
         'vendor_id',
         'vendor_name',
         'vendor_status'
@@ -249,46 +323,45 @@ def create_risks_df(client_id):
     Create a pandas DataFrame from the risks data.
     Returns all applications, with null values for those without risk information.
     """
+    
     client = get_client(client_id) # Replace with your Client Id
 
     # Retrieve application data from the API
-    apps_response = get_application_data(client)
+    applications = get_applications(client)
     
-    if not apps_response or 'applications' not in apps_response or not apps_response['applications']:
-        print("No application data found")
+    if not applications:
         return pd.DataFrame()
 
     # First create a DataFrame with all applications
     all_apps_data = []
-    for app in apps_response['applications']:
-        risk_metadata = app.get('risk_metadata', {}) or {}
-        application_risk_level = risk_metadata.get('risk_framework_level', None)
+    for app in applications:
+        assessed_risk_level = app.get('assessed_risk_level', None)
         all_apps_data.append({
-            'application_id': app['application_id'],
-            'application_name': app['application_name'],
-            'application_risk_level': application_risk_level
+            'application_id': app['id'],
+            'application_name': app['name'],
+            'assessed_risk_level': assessed_risk_level
         })
     all_apps_df = create_df(all_apps_data)
 
     # Create a DataFrame from the risk data
     risk_data = []
-    for app in apps_response['applications']:
-        app_id = app['application_id']
-        risk_items = app.get('risk_item_list', []) or []
+    for app in applications:
+        app_id = app['id']
+        risk_items = app.get('assigned_risk_items', []) or []
         for risk_item in risk_items:
             risk_data.append({
                 'application_id': app_id,
-                'risk_type': risk_item.get('risk_type_label', ''),
+                'risk_type': risk_item.get('risk_type', ''),
                 'severity': risk_item.get('severity', ''),
                 'probability': risk_item.get('probability', ''),
+                'description': risk_item.get('description', '')
             })
 
     # Convert risk data to DataFrame
     risk_df = create_df(risk_data)
     
     if risk_df.empty:
-        print("No risk data found")
-        return pd.DataFrame()
+        return all_apps_df  # Return apps without risk data
 
     # Merge all applications with risk data
     result = pd.merge(
@@ -297,5 +370,4 @@ def create_risks_df(client_id):
         on='application_id',
         how='left'
     )
-    
     return result

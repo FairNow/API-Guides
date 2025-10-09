@@ -1,12 +1,12 @@
-def get_application_data(client):
+def get_applications(client):
     """
-    Get application data from the FairNow API.
+    Get applications data from the FairNow API.
     """
-    application_route = "/applications"
+    route = "/applications"
 
     response = None
     try:
-        response = client.get(application_route, timeout=None)
+        response = client.get(route, timeout=None)
         if response.status_code == 200:
             response = response.json()
             return response
@@ -18,7 +18,12 @@ def get_application_data(client):
 
 
 def get_application_by_id(client, application_id: str):
+    """
+    Get individual application data from the FairNow API.
+    """
     route = f"/applications/{application_id}"
+
+    response = None
     try:
         response = client.get(route, timeout=None)
         if response.status_code == 200:
@@ -28,19 +33,18 @@ def get_application_by_id(client, application_id: str):
             print(f"Error: {response.status_code} - {response.text}")
             return None
     except Exception as e:
-        print(f"[EXCEPTION] Error fetching application {application_id}: {e}")
-        return None
+        print(e)
 
 
 def get_frameworks(client):
     """
     Get framework data from the FairNow API.
     """
-    application_route = "/frameworks"
+    route = "/frameworks"
 
     response = None
     try:
-        response = client.get(application_route, timeout=None)
+        response = client.get(route, timeout=None)
         if response.status_code == 200:
             response = response.json()
             return response
@@ -53,13 +57,13 @@ def get_frameworks(client):
 
 def get_controls(client):
     """
-    Get framework data from the FairNow API.
+    Get controls data from the FairNow API.
     """
-    application_route = "/controls"
+    route = "/controls"
 
     response = None
     try:
-        response = client.get(application_route, timeout=None)
+        response = client.get(route, timeout=None)
         if response.status_code == 200:
             response = response.json()
             return response
@@ -70,15 +74,15 @@ def get_controls(client):
         print(e)
 
 
-def get_vendor_data(client):
+def get_vendors(client):
     """
     Get vendor data from the FairNow API.
     """
-    application_route = "/vendors"
+    route = "/vendors"
 
     response = None
     try:
-        response = client.get(application_route, timeout=None)
+        response = client.get(route, timeout=None)
         if response.status_code == 200:
             response = response.json()
             return response

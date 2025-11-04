@@ -332,14 +332,16 @@ def create_risks_df(client_id):
     if not applications:
         return pd.DataFrame()
 
-    # First create a DataFrame with all applications
+# First create a DataFrame with all applications
     all_apps_data = []
     for app in applications:
         assessed_risk_level = app.get('assessed_risk_level', None)
+        assigned_risk_level = app.get('assigned_risk_level', None)
         all_apps_data.append({
             'application_id': app['id'],
             'application_name': app['name'],
-            'assessed_risk_level': assessed_risk_level
+            'assessed_risk_level': assessed_risk_level,
+            'user_assigned_risk_level': assigned_risk_level
         })
     all_apps_df = create_df(all_apps_data)
 

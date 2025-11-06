@@ -1,4 +1,6 @@
+import re
 import pandas as pd
+
 from utils.api_helpers import get_applications, get_frameworks, get_vendors, get_application_by_id, get_controls
 from utils.fairnow import get_client
 
@@ -351,12 +353,16 @@ def create_risks_df(client_id):
         app_id = app['id']
         risk_items = app.get('assigned_risk_items', []) or []
         for risk_item in risk_items:
+            description = risk_item.get('description', '')
+            # Replace all newlines/tabs with a space and clean quotes
+            description = re.sub(r'[\r\n\t]+', ' ', description).strip()
+            description = description.replace('"', "'")
             risk_data.append({
                 'application_id': app_id,
                 'risk_type': risk_item.get('risk_type', ''),
                 'severity': risk_item.get('severity', ''),
                 'probability': risk_item.get('probability', ''),
-                'description': risk_item.get('description', '')
+                'description': description
             })
 
     # Convert risk data to DataFrame
